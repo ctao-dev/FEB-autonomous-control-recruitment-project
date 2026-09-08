@@ -88,21 +88,21 @@ def controller(x):
 
 
     # utilize Stanely controller to compute the steering angle
-    k = 0.4# gain for lateral error
+    k = 0.3 # gain for lateral error
     heading_error = np.arctan2(
         np.sin(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi),
         np.cos(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi)
     )
-    steering_correction = heading_error + np.arctan2(k * lateral_error, v + 1e-5)
+    steering_correction = heading_error - np.arctan2(k * lateral_error, v + 1e-5)
     desired_theta = np.clip(
     steering_correction,
     *sim.steering_limits
     )
 
-    steering_rate = (desired_theta - theta) / 0.1
+    steering_rate = (desired_theta - theta) / 0.2
 
 
-    acceleration, integral_error, prev_error = compute_acceleration(v, 10.0, 0.01, 1.0, 0.3,0.01)
+    acceleration, integral_error, prev_error = compute_acceleration(v, 10.0, 0.01, 1.0, 0.1, 0.01)
 
     #print(f"Position: ({xpos:.2f}, {ypos:.2f}), Heading: {phi:.2f}, Velocity: {v:.2f}, Steering Angle: {theta:.2f}")
 
