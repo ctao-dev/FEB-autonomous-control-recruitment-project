@@ -3,7 +3,7 @@ from simulator import Simulator, centerline
 
 sim = Simulator()
 
-def find_closest_point(x, y, s_range, num_points=100):
+def find_closest_point(x, y, s_range, num_points):
     """find the closest point on the centerline to the current position
 
     Args:
@@ -47,9 +47,7 @@ def compute_acceleration(current_speed, target_speed, dt, kp, ki, kd, max_accel=
     acceleration = kp * error + ki * integral_error + kd * derivative_error
     return np.clip(acceleration, max_decel, max_accel), integral_error, error
 
-
 # this is a placeholder to check if it is the first run of the controller, so we can use global search for midline
-placeholder = True
 current_distance = 0.0 
 
 def controller(x):
@@ -68,19 +66,18 @@ def controller(x):
     theta   = x[4]                  # current steering angle
 
     ... # YOUR CODE HERE
-    global integral_error, prev_error, current_distance, placeholder
+
+    global integral_error, prev_error, current_distance
 
     # get the distance from the start of the track
     search_window = 5.0
-    if placeholder:
-        current_distance = find_closest_point(xpos, ypos, (0, 1000), num_points=1000)
-        palceholder = False
-    else:
-        current_distance = current_distance = find_closest_point(xpos, ypos, (max(0, current_distance - search_window), current_distance + search_window), num_points=50)  # far fewer points needed for a small window
+    current_distance = find_closest_point(xpos, ypos, (current_distance, current_distance + search_window), num_points=10)  # far fewer points needed for a small window
+
 
     # determine the closest point on the centerline and a point ahead of it
     current_point = centerline(current_distance)
-    ahead_point = centerline(current_distance + 0.1)
+    ahead_point = centerline(current_distance + 1.0)
+
 
     # determine the car location relative to the centerline
     tangent_vector = ahead_point - current_point
@@ -89,16 +86,28 @@ def controller(x):
     to_car = np.array([xpos, ypos]) - current_point
     lateral_error = tangent_vector[0] * to_car[1] - tangent_vector[1] * to_car[0]
 
+
     # utilize Stanely controller to compute the steering angle
-    k = 0.5  # gain for lateral error
-    heading_error = np.arctan2(tangent_vector[1], tangent_vector[0]) - phi
+    k = 0.1  # gain for lateral error
+    heading_error = np.arctan2(
+        np.sin(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi),
+        np.cos(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi)
+    )
     steering_correction = heading_error + np.arctan2(k * lateral_error, v + 1e-5)
+    desired_theta = np.clip(
+    heading_error + np.arctan2(k * lateral_error, v + 1e-5),
+    *sim.steering_limits
+    )
 
-    acceleration, integral_error, prev_error = compute_acceleration(v, 5.0, 0.1, 1.0, 0.1, 0.01)
+    steering_rate = (desired_theta - theta) / 0.5
 
-    print(f"Position: ({xpos:.2f}, {ypos:.2f}), Heading: {phi:.2f}, Velocity: {v:.2f}, Steering Angle: {theta:.2f}")
 
-    return np.array([1.0, 1.0])
+    acceleration, integral_error, prev_error = compute_acceleration(v, 10.0, 0.01, 1.0, 0.1, 0.01)
+
+    #print(f"Position: ({xpos:.2f}, {ypos:.2f}), Heading: {phi:.2f}, Velocity: {v:.2f}, Steering Angle: {theta:.2f}")
+
+
+    return np.array([acceleration, np.clip(steering_rate, -1, 1)])
 
 
 
