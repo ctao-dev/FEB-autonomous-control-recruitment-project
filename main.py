@@ -2,6 +2,7 @@ import numpy as np
 from simulator import Simulator, centerline
 
 sim = Simulator()
+TRACK_LENGTH = 105
 
 def find_closest_point(x, y, s_range, num_points):
     """find the closest point on the centerline to the current position
@@ -71,12 +72,12 @@ def controller(x):
 
     # get the distance from the start of the track
     search_window = 5.0
-    current_distance = find_closest_point(xpos, ypos, (current_distance, current_distance + search_window), num_points=10)  # far fewer points needed for a small window
+    current_distance = find_closest_point(xpos, ypos, (current_distance, current_distance + search_window), num_points=10)%TRACK_LENGTH  # far fewer points needed for a small window104
 
 
     # determine the closest point on the centerline and a point ahead of it
     current_point = centerline(current_distance)
-    ahead_point = centerline(current_distance + 1.0)
+    ahead_point = centerline((current_distance + 1.0)%TRACK_LENGTH)  # look 1 meter ahead
 
 
     # determine the car location relative to the centerline
