@@ -4,9 +4,9 @@ import scipy
 
 sim = Simulator()
 
-def pred_future(curr_x, curr_u, dt=0.01):
+def pred_future(curr_x, curr_ua, curr_us, dt=0.01):
     x_pos, y_pos, phi, v, theta = curr_x
-    a, d_theta = curr_u
+    a, d_theta = curr_ua, curr_us
     wheel_base = 1.58
 
     x1 = x_pos + v * np.cos(phi) * dt
@@ -30,7 +30,7 @@ def find_closest_distance(x_pos, y_pos, previous_center_dist):
 def generate_horizon(previous_center_dist):
     new_pos = 0.07
     curr_pos = previous_center_dist
-    horizon = 3
+    horizon = 1
 
     arr = np.zeros(horizon * 100)
 
@@ -42,21 +42,33 @@ def generate_horizon(previous_center_dist):
 
 
 # should add a line to cost saying if slippage then cost -> way up
-def cost_function(u, curr_x, desired_x, horizon):
+def cost_function(u, curr_x, desired_x, horizon=1):
     cost = 0.0
     K = 1.0
 
     for i in range(horizon * 100):
-        nx = pred_future(curr_x)
+        nx = pred_future(curr_x, u[i], u[i + 100])
         cost += ((nx[0] - desired_x[i][0]) ** 2 + (nx[1] - desired_x[i][1]) ** 2 + K * nx[3] ** 2)
 
     return cost
 
-# need to program this
-def optimizer(xpos, ypos, phi, v, theta, a, dtheta):
+# should technically be horizon * 100 for each timestamp but this works for now
+previous_acceleration = [4] * 100
+previous_steering = [0] * 100
+acceleration_bounds = [(-10, 4) for _ in range(100)]
+steering_bounds = [(-1, 1) for _ in range(100)]
+previous_center_dist = 0
+net_bounds = acceleration_bounds + steering_bounds
+def optimizer(xpos, ypos, phi, v, theta):
     x0 = np.array([xpos, ypos, phi, v, theta])
-    u0 = np.array([a, dtheta])
+    new_acceleration = np.concatenate((previous_acceleration[1:], previous_acceleration[-1:]))
+    new_steering = np.concatenate((previous_steering[1:], previous_steering[-1:]))
+    u0 = np.concatenate((new_acceleration, new_steering))
 
+    desired_pos = generate_horizon(previous_center_dist)
+    
+    res = scipy.optimize.minimize(cost_function, u0, args=(x0, desired_pos), method = 'SLSQP', bounds=net_bounds, options=dict(maxiter=100),)
+    return res
 
     
 
@@ -75,16 +87,19 @@ def controller(x):
     v      = x[3]                   # current velocity
     theta   = x[4]                  # current steering angle
 
-    
-    
-    ... # YOUR CODE HERE
+    res = optimizer(xpos, ypos, phi, v, theta)
+    optimal_acceleration = res.x[:100]
+    optimal_steering = res.x[100:]
 
-    return np.array([0,0])
+    previous_acceleration = optimal_acceleration
+    previous_steering = optimal_steering
+
+    return np.array([optimal_acceleration[0], optimal_steering[0]])
 
 
 
 
 sim.set_controller(controller)
-sim.run()
-sim.animate()
+sim.run(tf=20)
+sim.animate(save=True)
 sim.plot()
