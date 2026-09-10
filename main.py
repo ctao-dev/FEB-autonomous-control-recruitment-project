@@ -89,7 +89,7 @@ def controller(x):
 
 
     # utilize Stanely controller to compute the steering angle
-    k = 0.3 # gain for lateral error
+    k = 0.2 # gain for lateral error
     heading_error = np.arctan2(
         np.sin(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi),
         np.cos(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi)
@@ -100,20 +100,50 @@ def controller(x):
     *sim.steering_limits
     )
 
-    steering_rate = (desired_theta - theta) / 0.2
+    steering_rate = (desired_theta - theta) / 0.4
 
+    # compute the turn acceleration and max turn speed based on the current steering angle
+    acceleration_limit = 11.0
 
-    acceleration, integral_error, prev_error = compute_acceleration(v, 10.0, 0.01, 1.0, 0.1, 0.01)
+    turn_acceleration = (
+        v**2 / 0.79 * np.sin(np.arctan(0.5 * np.tan(theta)))
+    )
+
+    turn_factor = abs(
+        np.sin(np.arctan(0.5 * np.tan(theta)))
+    )
+
+    if turn_factor > 1e-8:
+        max_turn_speed = np.sqrt(acceleration_limit * 0.79 / turn_factor)
+    else:
+        max_turn_speed = np.inf
+
+    target_speed = min(6.0, max_turn_speed)
+
+    linear_acceleration, integral_error, prev_error = compute_acceleration(
+        v, target_speed, 0.01, 1.0, 0.1, 0.01
+    )
+
+    # Reserve enough acceleration budget for cornering so net acceleration remains at or below the simulator's 12 m/s^2 limit.
+    max_linear_acceleration = np.sqrt(
+        max(0.0, acceleration_limit**2 - turn_acceleration**2)
+    )
+
+    linear_acceleration = np.clip(
+        linear_acceleration,
+        -max_linear_acceleration,
+        max_linear_acceleration,
+    )
 
     #print(f"Position: ({xpos:.2f}, {ypos:.2f}), Heading: {phi:.2f}, Velocity: {v:.2f}, Steering Angle: {theta:.2f}")
 
 
-    return np.array([acceleration, np.clip(steering_rate, -1, 1)])
+    return np.array([linear_acceleration, np.clip(steering_rate, -1, 1)])
 
 
 
 
 sim.set_controller(controller)
-sim.run()
+sim.run(tf=30)
 sim.animate()
 sim.plot()
