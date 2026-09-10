@@ -43,13 +43,26 @@ def compute_acceleration(current_speed, target_speed, dt, kp, ki, kd, max_accel=
         """
     global integral_error, prev_error
     error = target_speed - current_speed
-    integral_error += error * dt
+    candidate_integral = integral_error + error * dt
     derivative_error = (error - prev_error) / dt
-    acceleration = kp * error + ki * integral_error + kd * derivative_error
-    return np.clip(acceleration, max_decel, max_accel), integral_error, error
+    acceleration = kp * error + ki * candidate_integral + kd * derivative_error
+    clipped_acceleration = np.clip(acceleration, max_decel, max_accel)
 
-# this is a placeholder to check if it is the first run of the controller, so we can use global search for midline
-current_distance = 0.0 
+    # Do not keep integrating while the actuator is already saturated.
+    if clipped_acceleration == acceleration or np.sign(error) != np.sign(acceleration - clipped_acceleration):
+        integral_error = candidate_integral
+    return clipped_acceleration, integral_error, error
+
+
+WHEELBASE_HALF = 0.79
+NET_ACCELERATION_LIMIT = 11.5
+TURN_SPEED_ACCELERATION = 7.0
+MAX_TARGET_SPEED = 15.0
+MIN_SPEED_PREVIEW = 1.5
+MAX_SPEED_PREVIEW = 6.0
+SPEED_PREVIEW_GAIN = 0.5
+
+current_distance = 0 # Initialize the current distance along the track
 
 def controller(x):
     """controller for a car
@@ -72,7 +85,7 @@ def controller(x):
 
     # get the distance from the start of the track
     search_window = 5.0
-    current_distance = find_closest_point(xpos, ypos, (current_distance, current_distance + search_window), num_points=10)%TRACK_LENGTH  # far fewer points needed for a small window104
+    current_distance = find_closest_point(xpos, ypos, (current_distance, current_distance + search_window), num_points=10)%TRACK_LENGTH  # far fewer points needed for a small window
 
 
     # determine the closest point on the centerline and a point ahead of it
@@ -88,7 +101,7 @@ def controller(x):
     lateral_error = tangent_vector[0] * to_car[1] - tangent_vector[1] * to_car[0]
 
 
-    # utilize Stanely controller to compute the steering angle
+    # Utilize Stanely controller to compute the steering angle
     k = 0.2 # gain for lateral error
     heading_error = np.arctan2(
         np.sin(np.arctan2(tangent_vector[1], tangent_vector[0]) - phi),
@@ -102,38 +115,69 @@ def controller(x):
 
     steering_rate = (desired_theta - theta) / 0.4
 
-    # compute the turn acceleration and max turn speed based on the current steering angle
-    acceleration_limit = 11.0
-
-    turn_acceleration = (
-        v**2 / 0.79 * np.sin(np.arctan(0.5 * np.tan(theta)))
-    )
-
+    # Plan speed from both the current and requested steering angles. This
+    # slows the car before the steering angle has reached a sharp turn.
+    planning_theta = max(abs(theta), abs(desired_theta))
     turn_factor = abs(
-        np.sin(np.arctan(0.5 * np.tan(theta)))
+        np.sin(np.arctan(0.5 * np.tan(planning_theta)))
     )
-
     if turn_factor > 1e-8:
-        max_turn_speed = np.sqrt(acceleration_limit * 0.79 / turn_factor)
+        max_turn_speed = np.sqrt(
+            TURN_SPEED_ACCELERATION * WHEELBASE_HALF / turn_factor
+        )
     else:
         max_turn_speed = np.inf
 
-    target_speed = min(6.0, max_turn_speed)
+    # Estimate curvature farther along the track so braking starts before
+    # the current steering angle becomes large.
+    speed_preview = np.clip(
+        MIN_SPEED_PREVIEW + SPEED_PREVIEW_GAIN * max(v, 0.0),
+        MIN_SPEED_PREVIEW,
+        MAX_SPEED_PREVIEW,
+    )
+    preview_start = centerline((current_distance + speed_preview) % TRACK_LENGTH)
+    preview_end = centerline(
+        (current_distance + speed_preview + 1.0) % TRACK_LENGTH
+    )
+    preview_tangent = preview_end - preview_start
+    preview_tangent /= np.linalg.norm(preview_tangent)
+    current_heading = np.arctan2(tangent_vector[1], tangent_vector[0])
+    preview_heading = np.arctan2(preview_tangent[1], preview_tangent[0])
+    heading_change = np.arctan2(
+        np.sin(preview_heading - current_heading),
+        np.cos(preview_heading - current_heading),
+    )
+    curvature = abs(heading_change) / speed_preview
+    if curvature > 1e-8:
+        preview_turn_speed = np.sqrt(TURN_SPEED_ACCELERATION / curvature)
+        max_turn_speed = min(max_turn_speed, preview_turn_speed)
+
+    target_speed = min(MAX_TARGET_SPEED, max_turn_speed)
 
     linear_acceleration, integral_error, prev_error = compute_acceleration(
-        v, target_speed, 0.01, 1.0, 0.1, 0.01
+        v, target_speed, 0.01, 1.5, 0.1, 0.01
     )
 
-    # Reserve enough acceleration budget for cornering so net acceleration remains at or below the simulator's 12 m/s^2 limit.
-    max_linear_acceleration = np.sqrt(
-        max(0.0, acceleration_limit**2 - turn_acceleration**2)
+    # Use the simulator's exact lateral-acceleration model and reserve the
+    # remaining net-acceleration budget for longitudinal acceleration.
+    turn_acceleration = (
+        v**2 / WHEELBASE_HALF * np.sin(np.arctan(0.5 * np.tan(theta)))
+    )
+    # print(turn_acceleration) # Debugging to see if the turn acceleration is exceeding the limit
+    max_forward_acceleration = np.sqrt(
+        max(0.0, NET_ACCELERATION_LIMIT**2 - turn_acceleration**2)
+    )
+    max_braking_acceleration = np.sqrt(
+        max(0.0, 12.0**2 - turn_acceleration**2)
     )
 
     linear_acceleration = np.clip(
         linear_acceleration,
-        -max_linear_acceleration,
-        max_linear_acceleration,
+        -max_braking_acceleration,
+        max_forward_acceleration,
     )
+
+    #print(linear_acceleration) # Debugging linear acceleration to see if it is exceeding the limit
 
     #print(f"Position: ({xpos:.2f}, {ypos:.2f}), Heading: {phi:.2f}, Velocity: {v:.2f}, Steering Angle: {theta:.2f}")
 
