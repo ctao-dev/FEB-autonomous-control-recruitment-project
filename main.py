@@ -3,8 +3,9 @@ from simulator import Simulator, centerline
 import scipy
 
 sim = Simulator()
-
-def pred_future(curr_x, curr_ua, curr_us, dt=0.01):
+horizon = 1
+dt = 0.1
+def pred_future(curr_x, curr_ua, curr_us):
     x_pos, y_pos, phi, v, theta = curr_x
     a, d_theta = curr_ua, curr_us
     wheel_base = 1.58
@@ -15,48 +16,48 @@ def pred_future(curr_x, curr_ua, curr_us, dt=0.01):
     phi1 = phi + (v * np.tan(theta)/wheel_base) * dt
     theta1 = theta + d_theta * dt
 
-    return [x1, y1, v1, theta1, phi1]
+    theta1 = np.clip(theta1, -0.7, 0.7)
+
+    return [x1, y1, phi1, v1, theta1]
 
 def find_closest_distance(x_pos, y_pos, previous_center_dist):
     search_dist = 5.0
     search_range = np.linspace(previous_center_dist, previous_center_dist + search_dist, 10)
     search_points = centerline(search_range)
 
-    distances = np.linalg.norm(search_points - np.array(x_pos, y_pos), axis = 1)
-    closest_dist = np.argmin(distances)
+    distances = np.linalg.norm(search_points - np.array([x_pos, y_pos]), axis = 1)
+    closest_dist = search_range[np.argmin(distances)]
 
-    return closest_dist
+    return max(previous_center_dist, closest_dist)
 
 def generate_horizon(previous_center_dist):
-    new_pos = 0.07
-    curr_pos = previous_center_dist
-    horizon = 1
+    new_pos = 5
 
-    arr = np.zeros(horizon * 100)
-
-    for i in range(horizon * 100):
-        curr_pos += new_pos
-        arr[i] = curr_pos
+    arr = np.linspace(previous_center_dist + 0.01, previous_center_dist + new_pos * horizon, int(horizon/dt))
 
     return centerline(arr)
 
 
 # should add a line to cost saying if slippage then cost -> way up
-def cost_function(u, curr_x, desired_x, horizon=1):
+def cost_function(u, curr_x, desired_x):
     cost = 0.0
-    K = 1.0
+    tx = curr_x
 
-    for i in range(horizon * 100):
-        nx = pred_future(curr_x, u[i], u[i + 100])
-        cost += ((nx[0] - desired_x[i][0]) ** 2 + (nx[1] - desired_x[i][1]) ** 2 + K * nx[3] ** 2)
+    for i in range(int(horizon/dt)):
+        nx = pred_future(tx, u[i], u[i + int(horizon/dt)])
+        cost += ((nx[0] - desired_x[i][0]) ** 2 + (nx[1] - desired_x[i][1]) ** 2)
+        tx = nx
+
+    prevent_low_velocity = max(0.0, 2.0 - nx[3])
+    cost += 80 * prevent_low_velocity ** 2
 
     return cost
 
-# should technically be horizon * 100 for each timestamp but this works for now
-previous_acceleration = [4] * 100
-previous_steering = [0] * 100
-acceleration_bounds = [(-10, 4) for _ in range(100)]
-steering_bounds = [(-1, 1) for _ in range(100)]
+# should technically be horizon * 1/dt for each timestamp but this works for now
+previous_acceleration = [4] * int(horizon/dt)
+previous_steering = [0] * int(horizon/dt)
+acceleration_bounds = [(-10, 4) for _ in range(int(horizon/dt))]
+steering_bounds = [(-1, 1) for _ in range(int(horizon/dt))]
 previous_center_dist = 0
 net_bounds = acceleration_bounds + steering_bounds
 def optimizer(xpos, ypos, phi, v, theta):
@@ -67,7 +68,7 @@ def optimizer(xpos, ypos, phi, v, theta):
 
     desired_pos = generate_horizon(previous_center_dist)
     
-    res = scipy.optimize.minimize(cost_function, u0, args=(x0, desired_pos), method = 'SLSQP', bounds=net_bounds, options=dict(maxiter=100),)
+    res = scipy.optimize.minimize(cost_function, u0, args=(x0, desired_pos), method = 'SLSQP', bounds=net_bounds, options=dict(maxiter=20),)
     return res
 
     
@@ -88,12 +89,14 @@ def controller(x):
     theta   = x[4]                  # current steering angle
 
     res = optimizer(xpos, ypos, phi, v, theta)
-    optimal_acceleration = res.x[:100]
-    optimal_steering = res.x[100:]
+    optimal_acceleration = res.x[:int(horizon/dt)]
+    optimal_steering = res.x[int(horizon/dt):]
 
+    global previous_acceleration, previous_steering, previous_center_dist
     previous_acceleration = optimal_acceleration
     previous_steering = optimal_steering
-
+    previous_center_dist = find_closest_distance(xpos, ypos, previous_center_dist)
+    print(sim.t, " ", res.fun)
     return np.array([optimal_acceleration[0], optimal_steering[0]])
 
 
@@ -101,5 +104,6 @@ def controller(x):
 
 sim.set_controller(controller)
 sim.run(tf=20)
-sim.animate(save=True)
+print('bleh')
+sim.animate()
 sim.plot()
