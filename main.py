@@ -1,3 +1,6 @@
+"""
+I programmed the PID and Stanley Controller with the help of an LLM to understand how controller implementation works in Python
+"""
 import numpy as np
 from simulator import Simulator, centerline
 
