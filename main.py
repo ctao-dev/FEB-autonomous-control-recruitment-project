@@ -1,3 +1,4 @@
+# programmed by hand
 import numpy as np
 from simulator import Simulator, centerline
 import scipy
