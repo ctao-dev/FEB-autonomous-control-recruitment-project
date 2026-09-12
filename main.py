@@ -5,6 +5,7 @@ import scipy
 sim = Simulator()
 horizon = 1
 dt = 0.1
+
 def pred_future(curr_x, curr_ua, curr_us):
     x_pos, y_pos, phi, v, theta = curr_x
     a, d_theta = curr_ua, curr_us
@@ -31,12 +32,14 @@ def find_closest_distance(x_pos, y_pos, previous_center_dist):
     return max(previous_center_dist, closest_dist)
 
 def generate_horizon(previous_center_dist):
-    new_pos = 5
+    new_pos = 7
 
     arr = np.linspace(previous_center_dist + 0.01, previous_center_dist + new_pos * horizon, int(horizon/dt))
 
     return centerline(arr)
 
+def lateral_acceleration(v, theta, a, d_theta, L=1.58):
+    return (v ** 2 * np.tan(theta)) / L
 
 # should add a line to cost saying if slippage then cost -> way up
 def cost_function(u, curr_x, desired_x):
@@ -46,10 +49,8 @@ def cost_function(u, curr_x, desired_x):
     for i in range(int(horizon/dt)):
         nx = pred_future(tx, u[i], u[i + int(horizon/dt)])
         cost += ((nx[0] - desired_x[i][0]) ** 2 + (nx[1] - desired_x[i][1]) ** 2)
+        cost += 1000000 * max((u[i] ** 2 + lateral_acceleration(nx[3], nx[4], u[i], u[i + int(horizon/dt)]) ** 2 - 144), 0)
         tx = nx
-
-    prevent_low_velocity = max(0.0, 2.0 - nx[3])
-    cost += 80 * prevent_low_velocity ** 2
 
     return cost
 
@@ -68,12 +69,18 @@ def optimizer(xpos, ypos, phi, v, theta):
 
     desired_pos = generate_horizon(previous_center_dist)
     
-    res = scipy.optimize.minimize(cost_function, u0, args=(x0, desired_pos), method = 'SLSQP', bounds=net_bounds, options=dict(maxiter=20),)
+    res = scipy.optimize.minimize(cost_function, u0, args=(x0, desired_pos), method = 'SLSQP', bounds=net_bounds, options=dict(maxiter=100),)
     return res
 
     
-
+call = 0
+control_hold = 2
+tick = 0
+car_RMSD = 0
+l_time = 0
+lap_num = 0
 def controller(x):
+
     """controller for a car
 
     Args:
@@ -88,22 +95,36 @@ def controller(x):
     v      = x[3]                   # current velocity
     theta   = x[4]                  # current steering angle
 
-    res = optimizer(xpos, ypos, phi, v, theta)
-    optimal_acceleration = res.x[:int(horizon/dt)]
-    optimal_steering = res.x[int(horizon/dt):]
 
-    global previous_acceleration, previous_steering, previous_center_dist
-    previous_acceleration = optimal_acceleration
-    previous_steering = optimal_steering
+    global previous_acceleration, previous_steering, previous_center_dist, control_hold, tick
+    step = tick%control_hold
+
+    if(step == 0):
+        res = optimizer(xpos, ypos, phi, v, theta)
+        optimal_acceleration = res.x[:int(horizon/dt)]
+        optimal_steering = res.x[int(horizon/dt):]
+        previous_acceleration = optimal_acceleration
+        previous_steering = optimal_steering
+
     previous_center_dist = find_closest_distance(xpos, ypos, previous_center_dist)
-    print(sim.t, " ", res.fun)
-    return np.array([optimal_acceleration[0], optimal_steering[0]])
+    if(previous_center_dist > 105 and lap_num == 0):
+        l_time = tick/100
+        lap_num += 1
+    previous_center_dist = previous_center_dist%105.
+    curr_center_point = centerline(previous_center_dist)
+    RMSD += np.norm(curr_center_point-[xpos, ypos]);
+
+
+    tick += 1
+
+    print(tick/100, " ", previous_acceleration[0])
+    return np.array([previous_acceleration[0], previous_steering[0]])
 
 
 
 
 sim.set_controller(controller)
-sim.run(tf=20)
-print('bleh')
+sim.run(tf=30)
 sim.animate()
 sim.plot()
+print(np.sqrt(1/tick * car_RMSD));

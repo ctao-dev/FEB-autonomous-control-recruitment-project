@@ -108,7 +108,6 @@ class Simulator:
         self.log = []
         state = np.zeros(5)
         for t in np.arange(0, tf, 0.01):
-            self.t = t
             u = self.cb(state)
             assert isinstance(u, np.ndarray), f"expected numpy array from controller but got type {type(u)}"
             assert u.shape==(2,), f"expected shape (2,) from controller but received {u.shape}"
