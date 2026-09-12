@@ -1,4 +1,6 @@
-# programmed by hand
+"""
+I implemented this program without the help of an LLM.
+"""
 import numpy as np
 from simulator import Simulator, centerline
 import scipy
