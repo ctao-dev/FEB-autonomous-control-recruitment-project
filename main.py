@@ -1,5 +1,6 @@
 """
 I implemented this program without any LLM assistance.
+* May take a while before the simulation pops up (took my laptop approximately 3-4 minutes before the simulation appeared)
 """
 import numpy as np
 from simulator import Simulator, centerline
