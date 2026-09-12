@@ -67,6 +67,11 @@ SPEED_PREVIEW_GAIN = 0.5
 
 current_distance = 0 # Initialize the current distance along the track
 
+laptime = 0
+old_distance = 0
+tick = 0
+car_RMSD = 0
+
 def controller(x):
     """controller for a car
 
@@ -84,7 +89,7 @@ def controller(x):
 
     ... # YOUR CODE HERE
 
-    global integral_error, prev_error, current_distance
+    global integral_error, prev_error, current_distance, laptime, old_distance, car_RMSD, tick
 
     # get the distance from the start of the track
     search_window = 5.0
@@ -181,8 +186,16 @@ def controller(x):
     )
 
     #print(linear_acceleration) # Debugging linear acceleration to see if it is exceeding the limit
-
+    tick += 1
     #print(f"Position: ({xpos:.2f}, {ypos:.2f}), Heading: {phi:.2f}, Velocity: {v:.2f}, Steering Angle: {theta:.2f}")
+    # calculated lap time
+    if(current_distance < old_distance and laptime == 0):
+        laptime = tick/100
+
+    old_distance = current_distance
+
+    # calculate car RMSD
+    car_RMSD += np.linalg.norm(current_point - [xpos, ypos]) ** 2
 
 
     return np.array([linear_acceleration, np.clip(steering_rate, -1, 1)])
@@ -194,3 +207,5 @@ sim.set_controller(controller)
 sim.run(tf=30)
 sim.animate()
 sim.plot()
+print("RMSD is:", np.sqrt(1/tick * car_RMSD))
+print("Lap time is:", laptime)
