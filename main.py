@@ -1,5 +1,5 @@
 """
-I implemented this program without the help of an LLM.
+I implemented this program without any LLM assistance.
 """
 import numpy as np
 from simulator import Simulator, centerline
